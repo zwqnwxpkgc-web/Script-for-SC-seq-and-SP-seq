@@ -1,0 +1,153 @@
+& "D:\Program Files\R\R-4.5.1\bin\x64\Rscript.exe" -e
+# 切换到工作目录
+setwd('')
+
+# 基于网格坐标的近邻分析方法
+# 使用get_loc_10x函数实现
+
+# 实现get_loc_10x函数
+get_loc_10x <- function(loc, barcode, num) {
+    # 获取目标spot的坐标
+    row <- loc[barcode, ]$row
+    col <- loc[barcode, ]$col
+    
+    col_list <- list()
+    
+    # 构建num+1层的邻域范围
+    for (i in 1:(num + 1)) {
+        # 计算row和col的范围
+        row_range <- c((row - (i - 1)):(row + (i - 1)))
+        col_range <- c((col - 2 * num + (i - 1)):(col + 2 * num - (i - 1)))
+        
+        # 找到在范围内的spots
+        part_col <- loc[loc$row %in% row_range & loc$col %in% col_range, ]
+        col_list[[i]] <- rownames(part_col)
+    }
+    
+    # 返回去重后的spot名称列表
+    unique(unlist(col_list))
+}
+
+# 基于网格坐标的近邻分析函数
+grid_neighborhood_analysis <- function(sample, num = 2) {
+    cat('基于网格坐标的近邻分析 -', sample, '样本\n')
+    
+    # 读取数据
+    input_file <- paste0('input/', sample, '_input.csv')
+    combined_data <- read.csv(input_file, header = TRUE, row.names = 1, check.names = FALSE, stringsAsFactors = FALSE)
+    
+    cat('数据维度:', nrow(combined_data), 'spots\n')
+    
+    # 第一步：基于celltype定义intra spots
+    cat('\n第一步：定义intra spots\n')
+    intra_mask <- combined_data$celltype == 'Epithelialcells'
+    intra_count <- sum(intra_mask, na.rm = TRUE)
+    cat('intra spots数量 (Epithelialcells):', intra_count, '(', round(intra_count/nrow(combined_data)*100, 1), '%)\n')
+    
+    # 获取intra spots
+    intra_spots <- combined_data[intra_mask, ]
+    cat('intra spots维度:', nrow(intra_spots), 'spots\n')
+    
+    # 第二步：基于网格坐标的近邻分析
+    cat('\n第二步：基于网格坐标的近邻分析\n')
+    cat('使用网格坐标方法进行分类（num=', num, '）\n', sep = '')
+    
+    # 初始化分类结果
+    predicted_type <- character(nrow(combined_data))
+    
+    # 对于intra spots，直接分类为intra_spot
+    predicted_type[intra_mask] <- 'intra_spot'
+    
+    # 对于非intra spots，判断是否在intra spots的邻域内
+    non_intra_indices <- which(!intra_mask)
+    cat('非intra spots数量:', length(non_intra_indices), '\n')
+    
+    if (length(non_intra_indices) > 0) {
+        # 获取所有intra spots的名称
+        intra_barcodes <- rownames(intra_spots)
+        
+        # 创建所有spots的邻域映射
+        cat('构建邻域映射...\n')
+        
+        # 对于每个非intra spot，检查是否在任何intra spot的邻域内
+        for (i in non_intra_indices) {
+            current_barcode <- rownames(combined_data)[i]
+            
+            # 检查当前spot是否在任何intra spot的邻域内
+            is_inter <- FALSE
+            
+            for (intra_barcode in intra_barcodes) {
+                # 获取intra spot的邻域
+                neighbors <- get_loc_10x(combined_data, intra_barcode, num)
+                
+                # 如果当前spot在邻域内，则标记为inter_spot
+                if (current_barcode %in% neighbors) {
+                    is_inter <- TRUE
+                    break
+                }
+            }
+            
+            if (is_inter) {
+                predicted_type[i] <- 'inter_spot'
+            } else {
+                predicted_type[i] <- 'distal_spot'
+            }
+        }
+    }
+    
+    # 统计各类spot数量
+    intra_count <- sum(predicted_type == 'intra_spot')
+    inter_count <- sum(predicted_type == 'inter_spot')
+    distal_count <- sum(predicted_type == 'distal_spot')
+    
+    total_count <- nrow(combined_data)
+    
+    cat('\n分类结果统计:\n')
+    cat('- intra_spot:', intra_count, '(', round(intra_count/total_count*100, 1), '%)\n')
+    cat('- inter_spot:', inter_count, '(', round(inter_count/total_count*100, 1), '%)\n')
+    cat('- distal_spot:', distal_count, '(', round(distal_count/total_count*100, 1), '%)\n')
+    
+    # 生成结果
+    result <- data.frame(
+        Barcode = paste0(rownames(combined_data), '-1'),
+        sampleid = sample,
+        clusters = 0,
+        group = sample,
+        Epithelialcells_spot_type = predicted_type,
+        stringsAsFactors = FALSE
+    )
+    
+    # 保存结果
+    output_file <- paste0('results/', sample, '_neighborhood_analysis_grid_method.csv')
+    write.csv(result, output_file, row.names = FALSE)
+    cat('\n结果已保存到', output_file, '\n')
+    
+    # 显示前几行结果
+    cat('前5行结果预览:\n')
+    print(head(result, 5))
+    
+    return(result)
+}
+
+# 测试PT2样本
+cat('=== PT2样本网格坐标近邻分析 ===\n')
+pt2_result <- grid_neighborhood_analysis('PT2', num = 2)
+write.csv(pt2_result,'PT2_result.csv')
+
+pt5_result <- grid_neighborhood_analysis('PT5', num = 2)
+write.csv(pt5_result,'PT5_result.csv')
+
+pt6_result <- grid_neighborhood_analysis('PT6', num = 2)
+write.csv(pt6_result,'PT6_result.csv')
+
+pt11_result <- grid_neighborhood_analysis('PT11', num = 2)
+write.csv(pt11_result,'PT11_result.csv')
+
+pt13_result <- grid_neighborhood_analysis('PT13', num = 2)
+write.csv(pt13_result,'PT13_result.csv')
+
+pt14_result <- grid_neighborhood_analysis('PT14', num = 2)
+write.csv(pt14_result,'PT14_result.csv')
+# 验证结果
+
+
